@@ -104,7 +104,7 @@ module.exports = class SpriteBoss extends CocoClass
     unless thangType = @thangTypeFor indieSprite.thangType
       console.warn "Need to convert #{indieSprite.id}'s ThangType #{indieSprite.thangType} to a ThangType reference. Until then, #{indieSprite.id} won't show up."
       return
-    sprite = new IndieSprite thangType, @createSpriteOptions {thangID: indieSprite.id, pos: indieSprite.pos, sprites: @sprites}
+    sprite = new IndieSprite thangType, @createSpriteOptions {thangID: indieSprite.id, pos: indieSprite.pos, sprites: @sprites, colorConfig: indieSprite.colorConfig}
     @addSprite sprite, sprite.thang.id
 
   createWizardSprite: (options) ->
@@ -137,7 +137,9 @@ module.exports = class SpriteBoss extends CocoClass
   addThangToSprites: (thang, layer=null) ->
     return console.warn 'Tried to add Thang to the surface it already has:', thang.id if @sprites[thang.id]
     thangType = _.find @options.thangTypes, (m) -> m.get('name') is thang.spriteName
-    sprite = new CocoSprite thangType, @createSpriteOptions thang: thang
+    options = @createSpriteOptions thang: thang
+    options.resolutionFactor = if thangType.get('kind') is 'Floor' then 2 else 4
+    sprite = new CocoSprite thangType, options
     @addSprite sprite, null, layer
     sprite.setDebug @debug
     sprite

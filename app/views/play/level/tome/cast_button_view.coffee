@@ -15,6 +15,7 @@ module.exports = class CastButtonView extends View
   constructor: (options) ->
     super options
     @spells = options.spells
+    @levelID = options.levelID
     isMac = navigator.platform.toUpperCase().indexOf('MAC') isnt -1
     @castShortcut = "⇧↩"
     @castShortcutVerbose = "Shift+Enter"
@@ -34,6 +35,8 @@ module.exports = class CastButtonView extends View
     # TODO: use a User setting instead of localStorage
     delay = localStorage.getItem 'autocastDelay'
     delay ?= 5000
+    if @levelID is 'project-dota'
+      delay = 90019001
     @setAutocastDelay delay
 
   attachTo: (spellView) ->
@@ -56,10 +59,11 @@ module.exports = class CastButtonView extends View
     @casting = true
     Backbone.Mediator.publish 'play-sound', trigger: 'cast', volume: 0.25
     @updateCastButton()
+    @onWorldLoadProgressChanged progress: 0
 
   onWorldLoadProgressChanged: (e) ->
     overlay = @castButtonGroup.find '.button-progress-overlay'
-    overlay.css 'width', e.progress * @castButtonGroup.width() - 6
+    overlay.css 'width', e.progress * @castButtonGroup.width() + 1
 
   onNewWorld: (e) ->
     @casting = false
@@ -72,7 +76,7 @@ module.exports = class CastButtonView extends View
     if @casting
       s = $.i18n.t("play_level.tome_cast_button_casting", defaultValue: "Casting")
     else if castable
-      s = $.i18n.t("play_level.tome_cast_button_castable", defaultValue: "Cast") + " " + @castShortcut
+      s = $.i18n.t("play_level.tome_cast_button_castable", defaultValue: "Cast Spell") + " " + @castShortcut
     else
       s = $.i18n.t("play_level.tome_cast_button_cast", defaultValue: "Spell Cast")
     @castButton.text s

@@ -1,28 +1,20 @@
 RootView = require 'views/kinds/RootView'
 Level = require 'models/Level'
+Simulator = require 'lib/simulator/Simulator'
 LevelSession = require 'models/LevelSession'
 CocoCollection = require 'models/CocoCollection'
+LeaderboardCollection  = require 'collections/LeaderboardCollection'
+{hslToHex} = require 'lib/utils'
 
 HIGHEST_SCORE = 1000000
 
 class LevelSessionsCollection extends CocoCollection
   url: ''
   model: LevelSession
-  
+
   constructor: (levelID) ->
     super()
     @url = "/db/level/#{levelID}/all_sessions"
-    
-class LeaderboardCollection extends CocoCollection
-  url: ''
-  model: LevelSession
-  
-  constructor: (level, options) ->
-    super()
-    options ?= {}
-    @url = "/db/level/#{level.get('original')}.#{level.get('version').major}/leaderboard?#{$.param(options)}"
-    #@url = "/db/level/#{level.get('original')}/leaderboard?#{$.param(options)}"
-
 
 module.exports = class LadderView extends RootView
   id: 'ladder-view'
@@ -31,8 +23,9 @@ module.exports = class LadderView extends RootView
 
   events:
     'click #simulate-button': 'onSimulateButtonClick'
+    'click #simulate-all-button': 'onSimulateAllButtonClick'
 
-  onSimulateButtonClick: (e) ->
+  onSimulateAllButtonClick: (e) ->
     submitIDs = _.pluck @leaderboards[@teams[0]].topPlayers.models, "id"
     for ID in submitIDs
       $.ajax
@@ -40,16 +33,40 @@ module.exports = class LadderView extends RootView
         method: 'POST'
         data:
           session: ID
-    alert "Simulating all games!"
-    alert "(do not push more than once pls)"
+    $("#simulate-all-button").prop "disabled", true
+    $("#simulate-all-button").text "Submitted all!"
 
-  
-  constructor: (options, levelID) ->
+  onSimulateButtonClick: (e) ->
+    $("#simulate-button").prop "disabled",true
+    $("#simulate-button").text "Simulating..."
+
+    @simulator.fetchAndSimulateTask()
+
+  updateSimulationStatus: (simulationStatus, sessions)->
+    @simulationStatus = simulationStatus
+    try
+      if sessions?
+        #TODO: Fetch names from Redis, the creatorName is denormalized
+        creatorNames = (session.creatorName for session in sessions)
+        @simulationStatus = "Simulating game between "
+        for index in [0...creatorNames.length]
+          unless creatorNames[index]
+            creatorNames[index] = "Anonymous"
+          @simulationStatus += " and " + creatorNames[index]
+        @simulationStatus += "..."
+    catch e
+      console.log "There was a problem with the named simulation status: #{e}"
+    $("#simulation-status-text").text @simulationStatus
+
+
+  constructor: (options, @levelID) ->
     super(options)
-    @level = new Level(_id:levelID)
+    @level = new Level(_id:@levelID)
     @level.fetch()
     @level.once 'sync', @onLevelLoaded, @
-    
+    @simulator = new Simulator()
+    @simulator.on 'statusUpdate', @updateSimulationStatus, @
+
 #    @sessions = new LevelSessionsCollection(levelID)
 #    @sessions.fetch({})
 #    @sessions.once 'sync', @onMySessionsLoaded, @
@@ -61,7 +78,7 @@ module.exports = class LadderView extends RootView
   startLoadingPhaseTwoMaybe: ->
     return unless @level.loaded # and @sessions.loaded
     @loadPhaseTwo()
-    
+
   loadPhaseTwo: ->
     alliedSystem = _.find @level.get('systems'), (value) -> value.config?.teams?
     teams = []
@@ -69,7 +86,8 @@ module.exports = class LadderView extends RootView
       continue unless teamConfig.playable
       teams.push teamName
     @teams = teams
-    
+    @teamConfigs = alliedSystem.config.teams
+
     @leaderboards = {}
     @challengers = {}
     for team in teams
@@ -78,9 +96,7 @@ module.exports = class LadderView extends RootView
       console.log "Team session: #{JSON.stringify teamSession}"
       @leaderboards[team] = new LeaderboardData(@level, team, teamSession)
       @leaderboards[team].once 'sync', @onLeaderboardLoaded, @
-#      @challengers[team] = new ChallengersData(@level, team, teamSession)
-#      @challengers[team].once 'sync', @onChallengersLoaded, @
-    
+
   onChallengersLoaded: -> @renderMaybe()
   onLeaderboardLoaded: -> @renderMaybe()
 
@@ -89,34 +105,33 @@ module.exports = class LadderView extends RootView
     return unless _.every loaders, (loader) -> loader.loaded
     @startsLoading = false
     @render()
-    
+
   getRenderData: ->
     ctx = super()
     ctx.level = @level
     description = @level.get('description')
     ctx.description = if description then marked(description) else ''
     ctx.link = "/play/level/#{@level.get('name')}"
+    ctx.simulationStatus = @simulationStatus
     ctx.teams = []
+    ctx.levelID = @levelID
     for team in @teams or []
       otherTeam = if team is 'ogres' then 'humans' else 'ogres'
+      color = @teamConfigs[team].color
+      bgColor = hslToHex([color.hue, color.saturation, color.lightness + (1 - color.lightness) * 0.5])
+      primaryColor = hslToHex([color.hue, 0.5, 0.5])
       ctx.teams.push({
         id: team
         name: _.string.titleize(team)
         leaderboard: @leaderboards[team]
         otherTeam: otherTeam
-#        easyChallenger: @challengers[team].easyPlayer.models[0]
-#        mediumChallenger: @challengers[team].mediumPlayer.models[0]
-#        hardChallenger: @challengers[team].hardPlayer.models[0]
+        bgColor: bgColor
+        primaryColor: primaryColor
       })
     ctx
-    
-  afterRender: ->
-    super()
-    @$el.find('#leaderboard-column .nav a:first').tab('show')
-      
+
 class LeaderboardData
   constructor: (@level, @team, @session) ->
-    console.log 'creating leaderboard data', @level, @team, @session
     _.extend @, Backbone.Events
     @topPlayers = new LeaderboardCollection(@level, {order:-1, scoreOffset: HIGHEST_SCORE, team: @team, limit: if @session then 10 else 20})
     @topPlayers.fetch()
@@ -125,7 +140,7 @@ class LeaderboardData
     @topPlayers.sort()
 
     @topPlayers.once 'sync', @leaderboardPartLoaded, @
-    
+
 #    if @session
 #      score = @session.get('totalScore') or 25
 #      @playersAbove = new LeaderboardCollection(@level, {order:1, scoreOffset: score, limit: 4, team: @team})
@@ -139,10 +154,28 @@ class LeaderboardData
     if @session
       if @topPlayers.loaded # and @playersAbove.loaded and @playersBelow.loaded
         @loaded = true
-        @trigger 'sync'
+        @fetchNames()
     else
       @loaded = true
+      @fetchNames()
+
+  fetchNames: ->
+    sessionCollections = [@topPlayers, @playersAbove, @playersBelow]
+    sessionCollections = (s for s in sessionCollections when s)
+    ids = []
+    for collection in sessionCollections
+      ids.push model.get('creator') for model in collection.models
+
+    success = (nameMap) =>
+      for collection in sessionCollections
+        session.set('creatorName', nameMap[session.get('creator')]) for session in collection.models
       @trigger 'sync'
+
+    $.ajax('/db/user/-/names', {
+      data: {ids: ids}
+      type: 'POST'
+      success: success
+    })
 
 class ChallengersData
   constructor: (@level, @team, @session) ->
@@ -162,4 +195,3 @@ class ChallengersData
     if @easyPlayer.loaded and @mediumPlayer.loaded and @hardPlayer.loaded
       @loaded = true
       @trigger 'sync'
-      

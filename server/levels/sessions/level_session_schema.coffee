@@ -134,9 +134,8 @@ _.extend LevelSessionSchema.properties,
     default: false
     index:true
 
-  submitDate:
-    type: c.date
-      title: 'Submitted'
+  submitDate: c.date
+    title: 'Submitted'
 
   submittedCode:
     type: 'object'
@@ -167,13 +166,14 @@ _.extend LevelSessionSchema.properties,
           items:
             type: 'object'
             properties:
-              id:
+              sessionID:
                 title: 'Opponent Session ID'
                 description: 'The session ID of an opponent.'
                 type: ['object', 'string']
-              codeSubmitDate: c.date
-                title: 'Submitted'
-                description: 'The date which the opponent submitted their session (used to check if the match can be replayed)'
+              userID:
+                title: 'Opponent User ID'
+                description: 'The user ID of an opponent'
+                type: ['object','string']
               metrics:
                 type: 'object'
                 properties:

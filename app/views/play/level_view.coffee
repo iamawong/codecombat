@@ -17,6 +17,7 @@ LevelSession = require 'models/LevelSession'
 Level = require 'models/Level'
 LevelComponent = require 'models/LevelComponent'
 Camera = require 'lib/surface/Camera'
+AudioPlayer = require 'lib/AudioPlayer'
 
 # subviews
 TomeView = require './level/tome/tome_view'
@@ -58,9 +59,13 @@ module.exports = class PlayLevelView extends View
     'surface:world-set-up': 'onSurfaceSetUpNewWorld'
     'level:session-will-save': 'onSessionWillSave'
     'level:set-team': 'setTeam'
+    'god:new-world-created': 'loadSoundsForWorld'
 
   events:
     'click #level-done-button': 'onDonePressed'
+
+  shortcuts:
+    'ctrl+s': 'onCtrlS'
 
   constructor: (options, @levelID) ->
     console.profile?() if PROFILE_ME
@@ -124,23 +129,27 @@ module.exports = class PlayLevelView extends View
     @session = @levelLoader.session
     @world = @levelLoader.world
     @level = @levelLoader.level
+    team = @getQueryVariable("team") ? @world.teamForPlayer(0)
 
-    if s = @levelLoader.opponentSession
-      spells = s.get('teamSpells')?[s.get('team')]
-      opponentCode = s.get('code')
-      myCode = @session.get('code') or {}
-      for spell in spells
-        continue unless c = opponentCode[spell]
-        myCode[spell] = c
-      @session.set('code', myCode)
+    opponentSpells = []
+    for spellTeam, spells of @session.get('teamSpells') or {}
+      continue if spellTeam is team or not team
+      opponentSpells = opponentSpells.concat spells
+
+    otherSession = @levelLoader.opponentSession
+    opponentCode = otherSession?.get('submittedCode') or {}
+    myCode = @session.get('code') or {}
+    for spell in opponentSpells
+      c = opponentCode[spell]
+      if c then myCode[spell] = c else delete myCode[spell]
+    @session.set('code', myCode)
 
     @levelLoader.destroy()
     @levelLoader = null
     @loadingScreen.destroy()
     @god.level = @level.serialize @supermodel
     @god.worldClassMap = @world.classMap
-    #@setTeam @world.teamForPlayer _.size @session.get 'players'   # TODO: players aren't initialized yet?
-    @setTeam @getQueryVariable("team") ? @world.teamForPlayer(0)
+    @setTeam team
     @initSurface()
     @initGoalManager()
     @initScriptManager()
@@ -182,6 +191,9 @@ module.exports = class PlayLevelView extends View
 #    @showWizardSettingsModal() if not me.get('name')
 
   # callbacks
+
+  onCtrlS: (e) ->
+    e.preventDefault()
 
   onLevelReloadFromData: (e) ->
     isReload = Boolean @world
@@ -388,6 +400,17 @@ module.exports = class PlayLevelView extends View
     team ?= 'humans'
     me.team = team
     Backbone.Mediator.publish 'level:team-set', team: team
+
+  # Dynamic sound loading
+
+  loadSoundsForWorld: (e) ->
+    return if @headless
+    world = e.world
+    thangTypes = @supermodel.getModels(ThangType)
+    for [spriteName, message] in world.thangDialogueSounds()
+      continue unless thangType = _.find thangTypes, (m) -> m.get('name') is spriteName
+      continue unless sound = AudioPlayer.soundForDialogue message, thangType.get('soundTriggers')
+      AudioPlayer.preloadSoundReference sound
 
   destroy: ->
     @supermodel.off 'error', @onLevelLoadError
